@@ -108,6 +108,12 @@ IKEA_FREKVENS='true' # IKEA Frekvens
 IKEA_OBEGRANSAD='true' # IKEA Obegränsad
 ```
 
+```ini
+FREKVENS2='true' # Frekvens2 on Waveshare ESP32-S3-Zero
+```
+
+When `FREKVENS2` is enabled, it takes precedence over the other device selectors, so existing device settings can remain saved. PlatformIO defaults to the Waveshare ESP32-S3-Zero environment, which uses COM22 for upload and monitoring; other environments are not built unless explicitly selected.
+
 Define pin assignments in [`secrets.h`](https://github.com/VIPnytt/Frekvens/blob/main/firmware/include/config/secrets.h):
 
 ```h
@@ -119,6 +125,18 @@ Define pin assignments in [`secrets.h`](https://github.com/VIPnytt/Frekvens/blob
 #define PIN_SW1 5  // SW1
 #define PIN_SW2 6  // SW
 #define PIN_MIC 7  // U3 pin 7
+```
+
+Frekvens2 uses the Waveshare ESP32-S3-Zero and its pin assignments are defined in [`Frekvens2.h`](https://github.com/VIPnytt/Frekvens/blob/main/firmware/include/config/Frekvens2.h):
+
+```h
+#define PIN_MIC 7
+#define PIN_OE 11  // EN
+#define PIN_MOSI 10 // DA
+#define PIN_SCLK 9  // CLK
+#define PIN_CS 8    // LAK
+#define PIN_SW1 1
+#define PIN_SW2 2
 ```
 
 ```h

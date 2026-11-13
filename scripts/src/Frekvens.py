@@ -11,6 +11,7 @@ from .components.Deprecated import Deprecated
 from .components.Partition import Partition
 from .components.Time import Time
 from .config.version import VERSION
+from .devices.Frekvens2 import Frekvens2
 from .devices.IkeaFrekvens import IkeaFrekvens
 from .devices.IkeaObegransad import IkeaObegransad
 from .extensions.Ota import Ota
@@ -48,7 +49,11 @@ class Frekvens:
             env (Environment): SCons build environment used to configure project components.
         """
         self.env = env
-        self.dotenv = {key: (value if value is not None else "") for key, value in dotenv.dotenv_values(".env").items()}
+        self.dotenv = {}
+        for path in self.dotenv_paths(env):
+            self.dotenv.update(
+                {key: (value if value is not None else "") for key, value in dotenv.dotenv_values(path).items()}
+            )
         self.dependency = Dependency(self)
         self.deprecated = Deprecated(self)
         self.extra = Extra(self)
@@ -63,6 +68,26 @@ class Frekvens:
             self.weather = Weather(self)
         if WebApp.ENV_OPTION in self.dotenv and self.dotenv[WebApp.ENV_OPTION] == "true":
             self.webapp = WebApp(self)
+
+    @staticmethod
+    def dotenv_paths(env: Environment) -> list[str]:
+        """
+        Return the dotenv files to load, in override order.
+
+        `.env` holds the shared defaults. `.env.local` and the file named by the
+        `custom_dotenv` option of the active PlatformIO environment hold
+        per-device settings and secrets; both are git-ignored and override `.env`.
+        """
+        paths = [".env"]
+        if os.path.isfile(".env.local"):
+            paths.append(".env.local")
+        custom = env.GetProjectOption("custom_dotenv", None)
+        if custom:
+            if os.path.isfile(custom):
+                paths.append(custom)
+            else:
+                print(f"Warning: custom_dotenv {custom!r} not found")
+        return paths
 
     def run(self) -> None:
         """
@@ -81,7 +106,9 @@ class Frekvens:
         Determines default application and host names, normalizes configured hostnames, and initializes the available project components.
         """
         if "NAME" not in self.dotenv:
-            if IkeaFrekvens.ENV_OPTION in self.dotenv and self.dotenv[IkeaFrekvens.ENV_OPTION] == "true":
+            if Frekvens2.ENV_OPTION in self.dotenv and self.dotenv[Frekvens2.ENV_OPTION] == "true":
+                self.dotenv["NAME"] = Frekvens2.NAME
+            elif IkeaFrekvens.ENV_OPTION in self.dotenv and self.dotenv[IkeaFrekvens.ENV_OPTION] == "true":
                 self.dotenv["NAME"] = IkeaFrekvens.NAME
             elif IkeaObegransad.ENV_OPTION in self.dotenv and self.dotenv[IkeaObegransad.ENV_OPTION] == "true":
                 self.dotenv["NAME"] = IkeaObegransad.NAME

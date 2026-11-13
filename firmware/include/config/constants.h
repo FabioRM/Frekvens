@@ -9,7 +9,9 @@
 /**
  * Device
  */
-#if IKEA_FREKVENS
+#if FREKVENS2
+#include "config/Frekvens2.h"
+#elif IKEA_FREKVENS
 #include "config/IkeaFrekvens.h"
 #elif IKEA_OBEGRANSAD
 #include "config/IkeaObegransad.h"

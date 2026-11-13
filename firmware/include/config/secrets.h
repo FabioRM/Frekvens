@@ -3,7 +3,15 @@
 /**
  * Definitions for the firmware section of the Frekvens project.
  * https://github.com/VIPnytt/Frekvens/wiki
+ *
+ * Keep personal values (pins, Wi-Fi credentials, location) in `secrets_local.h`
+ * next to this file. It is git-ignored and included first, so it overrides the
+ * examples below.
  */
+
+#if __has_include("secrets_local.h")
+#include "secrets_local.h"
+#endif
 
 /**
  * IKEA Frekvens
