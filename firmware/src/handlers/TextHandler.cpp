@@ -2,69 +2,67 @@
 
 #include "config/constants.h"        // NOLINT(misc-include-cleaner)
 #include "services/DisplayService.h" // NOLINT(misc-include-cleaner)
+#include "services/FontsService.h"
+
+#include <cctype>
 
 /**
  * @brief Initializes a text handler and calculates the text dimensions.
  *
- * @param text UTF-8 text to measure and render.
- * @param font Font used to retrieve glyph metrics and bitmap data.
+ * @param text UTF-8 text to measure and render, optionally with `{font:Name}` markup.
+ * @param font Default font, used until the text switches font.
  */
-TextHandler::TextHandler(std::string text, const FontModule &font) : text(text), font(&font)
+TextHandler::TextHandler(std::string text, const FontModule &font)
 {
-    if (text.length())
+    parse(text, font);
+    if (glyphs.empty())
     {
-        {
-            char32_t codepoint{0U};
-            int8_t yMax{0};
-            int8_t yMin{0};
-            size_t index{0U};
-            while (nextCodepoint(index, codepoint))
+        return;
+    }
+    int8_t yMax{0};
+    int8_t yMin{0};
+    for (const auto &[codepoint, glyphFont] : glyphs)
+    {
+        const FontModule::Symbol character{glyphFont->getChar(codepoint)};
+        std::visit(
+            [&](auto &&bitmap)
             {
-                const FontModule::Symbol character{font.getChar(codepoint)};
-                std::visit(
-                    [&](auto &&bitmap)
-                    {
-                        if (!bitmap.empty())
-                        {
-                            yMax = max<int8_t>(yMax, bitmap.size() + character.offsetY);
-                        }
-                    },
-                    character.bitmap);
-                yMin = min<int8_t>(yMin, character.offsetY);
-            }
-            height = yMax - yMin;
-        }
-        tracking = static_cast<uint8_t>(ceilf(height / Display.getRatio() / 10.0F));
-        {
-            width = 0U;
-            char32_t codepoint{0U};
-            size_t index{0U};
-            while (nextCodepoint(index, codepoint))
+                if (!bitmap.empty())
+                {
+                    yMax = max<int8_t>(yMax, bitmap.size() + character.offsetY);
+                }
+            },
+            character.bitmap);
+        yMin = min<int8_t>(yMin, character.offsetY);
+    }
+    height = yMax - yMin;
+    tracking = static_cast<uint8_t>(ceilf(height / Display.getRatio() / 10.0F));
+    width = 0U;
+    for (const auto &[codepoint, glyphFont] : glyphs)
+    {
+        const FontModule::Symbol character{glyphFont->getChar(codepoint)};
+        std::visit(
+            [&](auto &&bitmap)
             {
-                const FontModule::Symbol character{font.getChar(codepoint)};
-                std::visit(
-                    [&](auto &&bitmap)
-                    {
-                        if (!bitmap.empty())
-                        {
-                            width += calcMsbMax(bitmap) + 1U + character.offsetX + tracking;
-                        }
-                        else if (character.offsetX != 0U)
-                        {
-                            width += character.offsetX + tracking;
-                        }
-                        else
-                        {
-                            ESP_LOGV(font->name.data(), "missing symbol 0x%X %s", codepoint, encode(codepoint).data());
-                        }
-                    },
-                    character.bitmap);
-            }
-            if (width > tracking)
-            {
-                width -= tracking;
-            }
-        }
+                if (!bitmap.empty())
+                {
+                    width += calcMsbMax(bitmap) + 1U + character.offsetX + tracking;
+                }
+                else if (character.offsetX != 0U)
+                {
+                    width += character.offsetX + tracking;
+                }
+                else
+                {
+                    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-vararg,hicpp-vararg)
+                    ESP_LOGV(glyphFont->name.data(), "missing symbol 0x%X %s", codepoint, encode(codepoint).data());
+                }
+            },
+            character.bitmap);
+    }
+    if (width > tracking)
+    {
+        width -= tracking;
     }
 }
 
@@ -77,16 +75,14 @@ void TextHandler::draw(uint8_t brightness) const
  * @brief Renders the text at the specified position.
  *
  * @param x Horizontal starting position.
- * @param y Vertical baseline position.
+ * @param y Top of the text box; glyphs of every font share the same baseline.
  * @param brightness Pixel brightness.
  */
 void TextHandler::draw(int16_t x, int8_t y, uint8_t brightness) const
 {
-    char32_t codepoint{0U};
-    size_t index{0U};
-    while (nextCodepoint(index, codepoint))
+    for (const auto &[codepoint, glyphFont] : glyphs)
     {
-        const FontModule::Symbol character{font->getChar(codepoint)};
+        const FontModule::Symbol character{glyphFont->getChar(codepoint)};
         std::visit(
             [&](auto &&bitmap)
             {
@@ -132,16 +128,115 @@ uint8_t TextHandler::getHeight() const { return height; }
 uint8_t TextHandler::getWidth() const { return width; }
 
 /**
- * @brief Decodes the next UTF-8 code point from the stored text.
+ * @brief Splits the text into glyphs, each bound to the font active at that point.
+ *
+ * `{font:Name}` switches to the named font and `{font:}` back to the default one.
+ * Markup naming an unknown or disabled font is dropped and the current font is kept.
+ *
+ * @param text UTF-8 text with optional markup.
+ * @param font Default font.
+ */
+void TextHandler::parse(const std::string &text, const FontModule &font)
+{
+    const FontModule *current{&font};
+    size_t index{0U};
+    while (index < text.length())
+    {
+        if (text.compare(index, markupOpen.size(), markupOpen) == 0)
+        {
+            const size_t close{text.find('}', index + markupOpen.size())};
+            if (close != std::string::npos)
+            {
+                const std::string_view fontName{
+                    std::string_view{text}.substr(index + markupOpen.size(), close - index - markupOpen.size())};
+                if (fontName.empty())
+                {
+                    current = &font;
+                }
+                else if (const FontModule *resolved{resolveFont(fontName)})
+                {
+                    current = resolved;
+                }
+                index = close + 1U;
+                continue;
+            }
+        }
+        char32_t codepoint{0U};
+        if (nextCodepoint(text, index, codepoint))
+        {
+            // Fall back to the default font for characters the inline font lacks.
+            const FontModule *glyphFont{current};
+            if (current != &font)
+            {
+                const FontModule::Symbol symbol{current->getChar(codepoint)};
+                const bool missing{std::visit([](auto &&bitmap) { return bitmap.empty(); }, symbol.bitmap) &&
+                                   symbol.offsetX == 0U};
+                if (missing)
+                {
+                    glyphFont = &font;
+                }
+            }
+            glyphs.emplace_back(codepoint, glyphFont);
+        }
+    }
+}
+
+/**
+ * @brief Finds an enabled font by a loosely written name.
+ *
+ * @param fontName Font name; case, spaces, dashes and underscores are ignored.
+ * @return const FontModule* Font owned by this handler, or nullptr when not found.
+ */
+const FontModule *TextHandler::resolveFont(std::string_view fontName)
+{
+    const auto normalize{[](std::string_view value)
+                         {
+                             std::string out{};
+                             for (const char c : value)
+                             {
+                                 if (c != ' ' && c != '-' && c != '_')
+                                 {
+                                     out.push_back(static_cast<char>(std::tolower(static_cast<unsigned char>(c))));
+                                 }
+                             }
+                             return out;
+                         }};
+    const std::string wanted{normalize(fontName)};
+    for (const std::string_view name : FontsService::names)
+    {
+        if (normalize(name) != wanted)
+        {
+            continue;
+        }
+        for (const std::unique_ptr<const FontModule> &owned : inlineFonts)
+        {
+            if (owned->name == name)
+            {
+                return owned.get();
+            }
+        }
+        std::unique_ptr<const FontModule> loaded{Fonts.get(name)};
+        if (loaded)
+        {
+            inlineFonts.push_back(std::move(loaded));
+            return inlineFonts.back().get();
+        }
+    }
+    return nullptr;
+}
+
+/**
+ * @brief Decodes the next UTF-8 code point.
  *
  * Invalid, incomplete, overlong, surrogate, and out-of-range sequences are
  * replaced with U+FFFD.
  *
+ * @param text UTF-8 text.
  * @param index Index of the next byte to inspect; advanced past the consumed bytes.
  * @param buffer Receives the decoded code point or U+FFFD for an invalid sequence.
  * @return true if input bytes were available, false if the end of the text was reached.
  */
-bool TextHandler::nextCodepoint(size_t &index, char32_t &buffer) const
+bool TextHandler::nextCodepoint(const std::string &text, size_t &index, char32_t &buffer)
 {
     if (index >= text.length())
     {
@@ -177,13 +272,13 @@ bool TextHandler::nextCodepoint(size_t &index, char32_t &buffer) const
     }
     else
     {
-        buffer = U'\uFFFD';
+        buffer = U'�';
         return true;
     }
     if (index + remaining > text.length())
     {
         index = text.length();
-        buffer = U'\uFFFD';
+        buffer = U'�';
         return true;
     }
     while (remaining != 0U)
@@ -191,7 +286,7 @@ bool TextHandler::nextCodepoint(size_t &index, char32_t &buffer) const
         const uint8_t next{static_cast<uint8_t>(text[index])};
         if ((next & 0xC0U) != 0x80U)
         {
-            buffer = U'\uFFFD';
+            buffer = U'�';
             return true;
         }
         ++index;
@@ -200,7 +295,7 @@ bool TextHandler::nextCodepoint(size_t &index, char32_t &buffer) const
     }
     if (codepoint < minimum || codepoint > 0x10FFFFU || (codepoint >= 0xD800U && codepoint <= 0xDFFFU))
     {
-        buffer = U'\uFFFD';
+        buffer = U'�';
         return true;
     }
     buffer = codepoint;

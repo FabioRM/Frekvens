@@ -30,6 +30,12 @@ std::unique_ptr<const FontModule> FontsService::get(std::string_view fontName) c
         return std::make_unique<const SmallFont>();
     }
 #endif // FONT_SMALL
+#if FONT_ROBOTOMONO
+    if (fontName == RobotoMonoFont::name)
+    {
+        return std::make_unique<const RobotoMonoFont>();
+    }
+#endif // FONT_ROBOTOMONO
 #if FONT_MEDIUM
     if (fontName == MediumFont::name)
     {

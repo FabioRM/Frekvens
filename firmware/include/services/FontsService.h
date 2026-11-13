@@ -7,6 +7,7 @@
 #include "fonts/MediumWideFont.h" //NOLINT(misc-include-cleaner)
 #include "fonts/MicroFont.h"      //NOLINT(misc-include-cleaner)
 #include "fonts/MiniFont.h"       //NOLINT(misc-include-cleaner)
+#include "fonts/RobotoMonoFont.h"  //NOLINT(misc-include-cleaner)
 #include "fonts/SmallFont.h"      //NOLINT(misc-include-cleaner)
 #include "modules/ServiceModule.h"
 
@@ -39,6 +40,9 @@ public:
 #if FONT_SMALL
         SmallFont::name,
 #endif // FONT_SMALL
+#if FONT_ROBOTOMONO
+        RobotoMonoFont::name,
+#endif // FONT_ROBOTOMONO
 #if FONT_MEDIUM
         MediumFont::name,
 #endif // FONT_MEDIUM
